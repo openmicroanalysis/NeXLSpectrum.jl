@@ -93,7 +93,7 @@ function readEMSA(f::IO, T::Type{<:Real}=Float64)::Spectrum
     props[:Filename] = filename
     inData, xpcscale = 0, 1.0
     stgpos = Dict{Symbol,Float64}()
-    date, time, datatype = missing, missing, :Y
+    date, time, datatype, cps = missing, missing, :Y, false
     for (lx, line) in enumerate(eachline(f))
         if (lx ≤ 2)
             res = split_emsa_header_item(line)
@@ -140,6 +140,8 @@ function readEMSA(f::IO, T::Type{<:Real}=Float64)::Spectrum
                         inData = 1
                     elseif key == "BEAMKV"
                         props[:BeamEnergy] = 1000.0 * parse(Float64, value) # in eV
+                    elseif key == "YUNITS"
+                        cps = lowercase(value) == "cps"
                     elseif key == "XPERCHAN"
                         xperch = parse(Float64, value)
                         xpcscale = isnothing(mod) ? (xperch < 0.1 ? 1000.0 : 1.0) :  # Guess likely eV or keV
@@ -226,6 +228,9 @@ function readEMSA(f::IO, T::Type{<:Real}=Float64)::Spectrum
     if !isempty(stgpos)
         props[:StagePosition] = stgpos
     end
+    if cps && haskey(props, :LiveTime)
+        counts *= props[:LiveTime]
+    end
     return Spectrum(energy, counts, props)
 end
 
@@ -288,7 +293,7 @@ function writeEMSA(io::IOStream, spec::Spectrum)
     haskey(spec, :RealTime) && writeline(io, "REALTIME", "$(spec[:RealTime])")
     haskey(spec, :BeamEnergy) && writeline(io, "BEAMKV", "$(0.001*spec[:BeamEnergy])")
     haskey(spec, :ProbeCurrent) && writeline(io, "PROBECUR", "$(spec[:ProbeCurrent])")
-    haskey(spec, :TakeOffAngle) &&  writeline(io, "ELEVANGLE", "$(rad2deg(spec[:TakeOffAngle]))")
+    haskey(spec, :TakeOffAngle) && writeline(io, "ELEVANGLE", "$(rad2deg(spec[:TakeOffAngle]))")
     haskey(spec, :Azimuthal) && writeline(io, "AZIMANGLE", "$(rad2deg(spec[:Azimuthal]))")
     if haskey(spec, :StagePosition)
         sp = spec[:StagePosition]
@@ -307,7 +312,7 @@ function writeEMSA(io::IOStream, spec::Spectrum)
     haskey(spec, :DetectorModel) && writeline(io, "#RTDET", spec[:DetectorModel]) # Bruker
     haskey(spec, :DeadLayer) && writeline(io, "#TDEADLYR", spec[:DeadLayer])  # Bruker
     haskey(spec, :Fano) && writeline(io, "#FANO", spec[:Fano]) # Bruker
-    haskey(spec, :FWHMMnKa) &&  writeline(io, "#MNFWHM", spec[:FWHMMnKa], "EV") # Bruker
+    haskey(spec, :FWHMMnKa) && writeline(io, "#MNFWHM", spec[:FWHMMnKa], "EV") # Bruker
     haskey(spec, :XRFAnode) && writeline(io, "#IDENT", spec[:XRFAnode]) # Bruker
     # Write channel data
     if spec.energy isa LinearEnergyScale
